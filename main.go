@@ -1,28 +1,24 @@
 package main
 
 import (
-	"database/sql"
 	"log"
 	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
-	_ "github.com/go-sql-driver/mysql"
+	"gorm.io/driver/mysql"
+	"gorm.io/gorm"
 )
 
-type ToDo struct {
-	Id        string `json:"id"`
-	Todo      string `json:"todo"`
-	Completed bool   `json:"completed"`
+
+type ToDo struct{
+	Id string `gorm:"primaryKey"`
+	Todo string
+	Completed bool
 }
 
-func start() *sql.DB {
-	db, err := sql.Open("mysql", MYSQL_URI)
-
-	if err != nil {
-		log.Fatal(err)
-	}
-	err = db.Ping()
+func start() *gorm.DB {
+	db, err := gorm.Open(mysql.Open(MYSQL_URI), &gorm.Config{})
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -31,7 +27,9 @@ func start() *sql.DB {
 
 func main() {
 	db := start()
-	defer db.Close()
+
+	db.AutoMigrate(&ToDo{})
+
 	router := gin.Default()
 	router.GET("/", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
@@ -39,82 +37,53 @@ func main() {
 		})
 	})
 	router.GET("/todos", func(c *gin.Context) {
-		getTodos(c, db)
+		getTodos(c,db)
 	})
 	router.POST("/todos", func(c *gin.Context) {
-		addTodo(c, db)
+		addTodo(c,db)
 	})
 	router.PATCH("/todos/:id",func(c *gin.Context) {
-		updateTodo(c, db)
+		updateTodo(c,db)
 	} )
 	router.DELETE("/todos/:id", func(c *gin.Context) {
-		deleteTodo(c, db)
+		deleteTodo(c,db)
 	})
 
 	router.Run("localhost:8080")
 }
 
-func getTodos(c *gin.Context, db *sql.DB) {
-	var (
-		id        string
-		todo      string
-		completed bool
-	)
-	rows, err := db.Query("SELECT * FROM todos")
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer rows.Close()
-	list := []ToDo{}
-	for rows.Next() {
-		if err := rows.Scan(&id, &todo, &completed); err != nil {
-			log.Fatal(err)
-		}
-		list = append(list, ToDo{id, todo, completed})
-	}
+func getTodos(c *gin.Context, db *gorm.DB) {
+	var todos []ToDo
+	db.Find(&todos)
 	c.JSON(http.StatusOK, gin.H{
-		"todos": list,
+		"todos": todos,
 	})
 }
-func addTodo(c *gin.Context, db *sql.DB) {
+func addTodo(c *gin.Context, db *gorm.DB) {
 	id := c.PostForm("id")
 	todo := c.PostForm("todo")
-	stmt, err := db.Prepare("INSERT INTO todos VALUES(?,?,?)")
-	if err != nil {
-		log.Fatal(err)
-	}
-	_, err = stmt.Exec(id,todo,false)
-	if err != nil {
-		log.Fatal(err)
-	}
+	db.Create(&ToDo{id,todo,false})
 	c.JSON(http.StatusCreated, gin.H{
 		"msg": "Added Todo",
 	})
 }
-func updateTodo(c *gin.Context,db *sql.DB) {
+func updateTodo(c *gin.Context,db *gorm.DB) {
 	id := c.Param("id")
 	value, _ := strconv.ParseBool(c.Query("value"))
-	stmt,err := db.Prepare("UPDATE todos SET completed =? WHERE id=?")
-	if err!=nil{
-		log.Fatal(err)
-	}
-	if _,err = stmt.Exec(value,id); err!=nil{
-		log.Fatal(err)
-	}
+	var todo ToDo
+
+	db.First(&todo,"id=?",id)
+	db.Model(&todo).Update("completed",value)
+
 	c.JSON(http.StatusOK, gin.H{
 		"msg": "Updated todo " + c.Param("id"),
 	})
 }
-func deleteTodo(c *gin.Context,db *sql.DB) {
+func deleteTodo(c *gin.Context,db *gorm.DB) {
 	id := c.Param("id")
-	stmt,err := db.Prepare("DELETE FROM todos WHERE id=?")
-	if err!=nil{
-		log.Fatal(err)
-	}
-	if _,err = stmt.Exec(id); err!=nil{
-		log.Fatal(err)
-	}	
+	var todo ToDo
+	db.Delete(&todo,"id=?",id)
 	c.JSON(http.StatusOK, gin.H{
-		"msg": "Updated todo " + c.Param("id"),
+		"msg": "Deleted todo " + c.Param("id"),
 	})
 }
